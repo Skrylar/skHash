@@ -5,7 +5,6 @@
 # License), the author releases all claims of copyright on it.
 
 import
-  hash,
   unsigned
 
 # Crypto-code is decidedly performance critical.
