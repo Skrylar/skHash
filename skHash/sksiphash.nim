@@ -175,8 +175,6 @@ when isMainModule:
   type
     TestVector = array[0..7, int]
 
-  import unittest
-
   let ExpectedResults: array[0..63, TestVector] = [
     [ 0x31, 0x0E, 0x0E, 0xDD, 0x47, 0xDB, 0x6F, 0x72 ],
     [ 0xFD, 0x67, 0xDC, 0x93, 0xC5, 0x39, 0xF8, 0x74 ],
@@ -244,21 +242,21 @@ when isMainModule:
     [ 0x72, 0x45, 0x06, 0xEB, 0x4C, 0x32, 0x8A, 0x95 ]
   ]
 
-  test "siphash vectors":
-    var k: SipHash24Key
-    var input: array[0..64, uint8]
-    var output: array[0..7, uint8]
+  echo "testing siphash vectors"
+  var k: SipHash24Key
+  var input: array[0..64, uint8]
+  var output: array[0..7, uint8]
 
-    # initialize K
-    for i in 0..15:
-      k[i] = uint8(i)
+  # initialize K
+  for i in 0..15:
+    k[i] = uint8(i)
 
-    # do the things
-    for i in 0..63:
-      input[i] = uint8(i)
-      let hash = SipHash24(pointer(addr(input[0])), i, k)
-      let expected = U8To64LE(ExpectedResults[i])
-      check hash == expected
+  # do the things
+  for i in 0..63:
+    input[i] = uint8(i)
+    let hash = SipHash24(pointer(addr(input[0])), i, k)
+    let expected = U8To64LE(ExpectedResults[i])
+    doAssert(hash == expected)
 
 # }}}
 
