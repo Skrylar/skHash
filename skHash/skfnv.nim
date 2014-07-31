@@ -73,6 +73,7 @@ const
 {.push checks: off.}
 
 proc Fnv1Hash32*(input: pointer; length: int): uint32 =
+  ## Calculates the 32-bit Fowler-Noll-Vo hash of a given memory buffer.
   assert length >= 0
   let actualInput = cast[RawData](input)
   result = FnvOffset32
@@ -80,6 +81,9 @@ proc Fnv1Hash32*(input: pointer; length: int): uint32 =
     result = (result * FnvPrime32) xor actualInput[i]
 
 proc Fnv1aHash32*(input: pointer; length: int): uint32 =
+  ## Calculates the augmented 32-bit Fowler-Noll-Vo hash of a given
+  ## memory buffer. The augmented version is known to be slightly better
+  ## in many circumstances.
   assert length >= 0
   let actualInput = cast[RawData](input)
   result = FnvOffset32
@@ -95,6 +99,7 @@ proc Fnv1aHash32*(input: pointer; length: int): uint32 =
 {.push checks: off.}
 
 proc Fnv1Hash64*(input: pointer; length: int): uint64 =
+  ## Calculates the 64-bit Fowler-Noll-Vo hash of a given memory buffer.
   assert length >= 0
   let actualInput = cast[RawData](input)
   result = FnvOffset64
@@ -102,6 +107,9 @@ proc Fnv1Hash64*(input: pointer; length: int): uint64 =
     result = (result * FnvPrime64) xor actualInput[i]
 
 proc Fnv1aHash64*(input: pointer; length: int): uint64 =
+  ## Calculates the augmented 64-bit Fowler-Noll-Vo hash of a given
+  ## memory buffer. The augmented version is known to be slightly better
+  ## in many circumstances.
   assert length >= 0
   let actualInput = cast[RawData](input)
   result = FnvOffset64
