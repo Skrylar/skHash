@@ -14,7 +14,12 @@ import
 
 type
   SipHash24Key* = array[0..15, uint8]
-  RawData = ptr array[0..65535, uint8]
+
+  Siphash24Impl* = object
+    v0, v1, v2, v3, b, k0, k1, m: uint64
+    total: uint64
+    overflow:     array[0..8, int8]
+    overflowPos:  int
 
 # }}}
 
@@ -32,18 +37,22 @@ template ROTL(x, b: uint64): uint64 =
 # }}}
 
 # Integer Decoding {{{1
+
 # NB: This code can probably be moved to a separate module because its
 # also useful for non-crypto encoders as well.
 
-template U32To8LE[T](p: var T; v: uint32; offset: int = 0) =
-  p[0+offset] = uint8(v       )
-  p[1+offset] = uint8(v shr 8 )
-  p[2+offset] = uint8(v shr 16)
-  p[3+offset] = uint8(v shr 24)
+# NB: This stuff should probably check the local system encoding to make
+# sure it does everything correctly.
 
-template U64To8LE[T](p: var T; v: uint64; offset: int = 0) =
-  U32To8LE(p, uint32(v       ), 0)
-  U32To8LE(p, uint32(v shr 32), 4)
+# template U32To8LE[T](p: var T; v: uint32; offset: int = 0) =
+#   p[0+offset] = uint8(v       )
+#   p[1+offset] = uint8(v shr 8 )
+#   p[2+offset] = uint8(v shr 16)
+#   p[3+offset] = uint8(v shr 24)
+
+# template U64To8LE[T](p: var T; v: uint64; offset: int = 0) =
+#   U32To8LE(p, uint32(v       ), 0)
+#   U32To8LE(p, uint32(v shr 32), 4)
 
 template U8To64LE[T](p: T; offset: int = 0): uint64 =
   uint64(p[0+offset]) or
@@ -66,108 +75,125 @@ template Sipround(v0, v1, v2, v3: var uint64) =
   v2 = v2 + v1; v1 = ROTL(v1, 17); v1 = v1 xor v2; v2 = ROTL(v2, 32)
 
 # SipHash-2-4
-proc SipHash24*(input: pointer; length: int; k: SipHash24Key): uint64 =
-  assert input != nil
-  assert length >= 0
 
+proc Reset*(self: var Siphash24Impl;
+            k: SipHash24Key): bool {.noSideEffect.} =
+  # Note that `length` is the length of data which is being hashed; you
+  # must know this in advance, or space muffins will be upset.
+  self.total       = 0
+  self.overflowPos = 0
+  # FIXME set some flag that indicates we are ready for data
+  # Set up important stuff
   # "somepseudorandomlygeneratedbytes"
-  var v0 : uint64 = uint64(0x736F6D6570736575)
-  var v1 : uint64 = uint64(0x646F72616E646F6D)
-  var v2 : uint64 = uint64(0x6C7967656E657261)
-  var v3 : uint64 = uint64(0x7465646279746573)
-  var b  : uint64
-  var k0 : uint64 = U8To64LE(k, 0)
-  var k1 : uint64 = U8To64LE(k, 8)
-  var m  : uint64
+  self.v0 = uint64(0x736F6D6570736575)
+  self.v1 = uint64(0x646F72616E646F6D)
+  self.v2 = uint64(0x6C7967656E657261)
+  self.v3 = uint64(0x7465646279746573)
+  self.k0 = U8To64LE(k, 0)
+  self.k1 = U8To64LE(k, 8)
+  self.total  = 0
+  # Salt the potatos
+  self.v3 = self.v3 xor self.k1
+  self.v2 = self.v2 xor self.k0
+  self.v1 = self.v1 xor self.k1
+  self.v0 = self.v0 xor self.k0
+  return true
 
-  let eof = ( length - ( length mod sizeof(uint64) ) )
-  var left = cint(length and 7)
-  var pos = 0
+# XXX maybe in the future, init will do something special? want to keep
+# the nomenclature available for that situation.
+template Init*(self: var Siphash24Impl;
+               k: SipHash24Key): bool =
+  Reset(self, k)
 
-  let actualInput = cast[RawData](input)
+proc Feed*(self: var Siphash24Impl;
+           data: openarray[int8];
+           start, length: int): bool {.noSideEffect.} =
+  # FIXME check state flags
+  result = true
 
-  b = uint64(length) shl 56
+  var pos, epos: int
+  pos  = start
+  epos = pos + length
 
-  v3 = v3 xor k1
-  v2 = v2 xor k0
-  v1 = v1 xor k1
-  v0 = v0 xor k0
-
-  while pos < eof:
-    m = U8To64LE(actualInput, pos)
+  template DoRound(self:    var Siphash24Impl;
+                   input:   openarray[int8];
+                   offset:  int) =
+    let m = U8To64LE(input, offset)
     # Debug printing omitted.
-    v3 = v3 xor m
-    Sipround(v0, v1, v2, v3)
-    Sipround(v0, v1, v2, v3)
-    v0 = v0 xor m
-    inc(pos, 8)
+    self.v3 = self.v3 xor m
+    Sipround(self.v0, self.v1, self.v2, self.v3)
+    Sipround(self.v0, self.v1, self.v2, self.v3)
+    self.v0 = self.v0 xor m
+    self.total = self.total + 8.uint64
 
-  # NB: I would prefer this be unrolled.
-  while left > 0:
-    let x = left - 1
-    b = b or uint64( uint64(actualInput[pos+x]) shl uint64(x * 8) )
-    dec(left)
+  if self.overflowPos > 0:
+    # FIXME test and make sure this works; it should fill up the
+    # previous overflow and then process it
+    # Finish stuffing the overflow
+    while (self.overflowPos < 8) and (pos < epos):
+      self.overflow[self.overflowPos] = data[pos]
+      inc self.overflowPos
+      inc pos
+    # Process overflow buffer
+    DoRound(self, self.Overflow, 0)
+    self.overflowPos = 0
 
-  # Debug printing omitted.
+  while (epos - pos) > 7:
+    DoRound(self, data, pos)
+    inc pos, 8
 
-  v3 = v3 xor b
-  Sipround(v0, v1, v2, v3)
-  Sipround(v0, v1, v2, v3)
-  v0 = v0 xor b
+  if (epos - pos) > 0:
+    while pos < epos:
+      self.overflow[self.overflowPos] = data[pos]
+      inc self.overflowPos
+      inc self.total
+      inc pos
 
-  # Debug printing omitted.
+  # if self.left > 0.uint64:
+  #   let x = self.left - 1
+  # self.eof   = ( length - ( length mod sizeof(uint64).uint64 ) )
+  # self.left = uint64(length and 7)
+  #   self.b = uint64(self.total) shl 56
+  #   self.b = self.b or uint64( input shl uint64(x * 8) )
+  #   self.left = self.left - 1
+  # else:
+  #   return false
 
-  v2 = v2 xor 0xFF
-  Sipround(v0, v1, v2, v3)
-  Sipround(v0, v1, v2, v3)
-  Sipround(v0, v1, v2, v3)
-  Sipround(v0, v1, v2, v3)
-  b = v0 xor v1 xor v2 xor v3
-
-  return b
-
-# }}}
-
-# User Helpers {{{1
-
-proc SipHash24*(input: pointer; length: int): uint64 =
-  let key: SipHash24Key = [uint8(0), uint8(1), uint8(2), uint8(3),
-    uint8(4), uint8(5), uint8(6), uint8(7), uint8(8), uint8(9), uint8(10),
-    uint8(11), uint8(12), uint8(13), uint8(14), uint8(15)]
-  return SipHash24(input, length, key)
-
-proc SipHash24*(input: string): uint64 {.inline.} =
-  var data: string = input
-  shallowCopy(data, input)
-  return SipHash24(addr(data[0]), data.len)
-
-proc SipHash24*(input: string; key: SipHash24Key): uint64 {.inline.} =
-  var data: string = input
-  shallowCopy(data, input)
-  return SipHash24(addr(data[0]), data.len, key)
-
-template DefHash(typ: typedesc): stmt =
-  proc SipHash24*(input: typ): uint64 =
-    var data: typ
-    shallowCopy(data, input)
-    return SipHash24(addr(data), sizeof(typ))
-  proc SipHash24*(input: typ; key: SipHash24Key): uint64 =
-    var data: typ
-    shallowCopy(data, input)
-    return SipHash24(addr(data), sizeof(typ), key)
-
-DefHash(int)
-DefHash(int8)
-DefHash(int16)
-DefHash(int32)
-DefHash(int64)
-DefHash(uint)
-DefHash(uint8)
-DefHash(uint16)
-DefHash(uint32)
-DefHash(uint64)
+proc Finalize*(self: var Siphash24Impl): uint64 {.noSideEffect.} =
+  # FIXME check state flags
+  self.b = uint64(self.total) shl 56
+  if self.overflowPos > 0:
+    for i in 0..(self.overflowPos-1):
+      let input = self.overflow[i]
+      self.b = self.b or ( uint64( input ) shl (i * 8).uint64 )
+  # TODO chuck overflow buffer in here
+  self.v3 = self.v3 xor self.b
+  Sipround(self.v0, self.v1, self.v2, self.v3)
+  Sipround(self.v0, self.v1, self.v2, self.v3)
+  self.v0 = self.v0 xor self.b
+  self.v2 = self.v2 xor 0xFF
+  Sipround(self.v0, self.v1, self.v2, self.v3)
+  Sipround(self.v0, self.v1, self.v2, self.v3)
+  Sipround(self.v0, self.v1, self.v2, self.v3)
+  Sipround(self.v0, self.v1, self.v2, self.v3)
+  self.b = self.v0 xor self.v1 xor self.v2 xor self.v3
+  # FIXME set a flag that we are done, so people don't accidentally use
+  # an invalid hasher
+  return self.b
 
 # }}}
+
+# Utility Functions {{{1
+
+proc SipHash24*(input: openarray[int8];
+                pos, length: int;
+                key: SipHash24Key): uint64 =
+  var impl: Siphash24Impl
+  doAssert(impl.Init(key) == true)
+  doAssert(impl.Feed(input, pos, length) == true)
+  return impl.Finalize()
+
+# }}} Utility Functions
 
 # Test vectors {{{1
 
@@ -244,8 +270,7 @@ when isMainModule:
 
   echo "testing siphash vectors"
   var k: SipHash24Key
-  var input: array[0..64, uint8]
-  var output: array[0..7, uint8]
+  var input: array[0..64, int8]
 
   # initialize K
   for i in 0..15:
@@ -253,8 +278,8 @@ when isMainModule:
 
   # do the things
   for i in 0..63:
-    input[i] = uint8(i)
-    let hash = SipHash24(pointer(addr(input[0])), i, k)
+    input[i] = cast[int8](uint8(i))
+    let hash = SipHash24(input, 0, i, k)
     let expected = U8To64LE(ExpectedResults[i])
     doAssert(hash == expected)
 
