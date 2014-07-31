@@ -155,18 +155,34 @@ proc Fnv1aHash64*(input: string): uint64 =
   return Fnv1aHash64(addr(data[0]), data.len)
 
 proc Fnv1Hash32*[T:FnvEasilyHashable](input: T): uint64 =
+  ## Calculates the 32-bit Fowler-Noll-Vo hash of the supplied input. No
+  ## guarantees are made as to the endian-safety of hashed data; that
+  ## is, a hash made on a little endian system is not guaranteed to
+  ## match that of a big-endian system.
   var data = input
   return Fnv1Hash32(addr(data), sizeof(T))
 
 proc Fnv1aHash32*[T:FnvEasilyHashable](input: T): uint64 =
+  ## Calculates the augmented 32bit Fowler-Noll-Vo hash of the supplied
+  ## input. No guarantees are made as to the endian-safety of hashed
+  ## data; that is, a hash made on a little endian system is not
+  ## guaranteed to match that of a big-endian system.
   var data = input
   return Fnv1aHash32(addr(data), sizeof(T))
 
 proc Fnv1Hash64*[T:FnvEasilyHashable](input: T): uint64 =
+  ## Calculates the 64bit Fowler-Noll-Vo hash of the supplied input. No
+  ## guarantees are made as to the endian-safety of hashed data; that
+  ## is, a hash made on a little endian system is not guaranteed to
+  ## match that of a big-endian system.
   var data = input
   return Fnv1Hash64(addr(data), sizeof(T))
 
 proc Fnv1aHash64*[T:FnvEasilyHashable](input: T): uint64 =
+  ## Calculates the augmented 64bit Fowler-Noll-Vo hash of the supplied
+  ## input. No guarantees are made as to the endian-safety of hashed
+  ## data; that is, a hash made on a little endian system is not
+  ## guaranteed to match that of a big-endian system.
   var data = input
   return Fnv1aHash64(addr(data), sizeof(T))
 
