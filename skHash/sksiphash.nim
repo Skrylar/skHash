@@ -14,8 +14,13 @@ import
 
 type
   SipHash24Key* = array[0..15, uint8]
+    ## A key which may be supplied to a Siphash24 implementation. Keys
+    ## don't *necesserily* need to be anything special, however a key is
+    ## used as a form of salting and unique keys will preclude the
+    ## usability of generic rainbow tables.
 
   Siphash24Impl* = object
+    ## An implementation of Siphash24. Fully self-contained.
     v0, v1, v2, v3, b, k0, k1, m: uint64
     total: uint64
     overflow:     array[0..8, int8]
@@ -78,6 +83,9 @@ template Sipround(v0, v1, v2, v3: var uint64) =
 
 proc Reset*(self: var Siphash24Impl;
             k: SipHash24Key): bool {.noSideEffect.} =
+  ## Resets a previously initialized siphash24 implementation, so that
+  ## it can be used with a different set of data.
+
   # Note that `length` is the length of data which is being hashed; you
   # must know this in advance, or space muffins will be upset.
   self.total       = 0
@@ -99,15 +107,17 @@ proc Reset*(self: var Siphash24Impl;
   self.v0 = self.v0 xor self.k0
   return true
 
-# XXX maybe in the future, init will do something special? want to keep
-# the nomenclature available for that situation.
-template Init*(self: var Siphash24Impl;
-               k: SipHash24Key): bool =
-  Reset(self, k)
+proc Init*(self: var Siphash24Impl;
+               k: SipHash24Key): bool {.inline.} =
+  ## Initializes a siphash24 implementation.
+  return Reset(self, k)
 
 proc Feed*(self: var Siphash24Impl;
            data: openarray[int8];
            start, length: int): bool {.noSideEffect.} =
+  ## Supplies binary data to a siphash24 implementation, using the
+  ## provided `data` array and `start`/`length` information.
+
   # FIXME check state flags
   result = true
 
@@ -160,6 +170,10 @@ proc Feed*(self: var Siphash24Impl;
   #   return false
 
 proc Finalize*(self: var Siphash24Impl): uint64 {.noSideEffect.} =
+  ## Indicates that there is no more data to be hashed; performs any
+  ## final calculations and returns the 64-bit result of the siphash24
+  ## implementation on all previously supplied data.
+
   # FIXME check state flags
   self.b = uint64(self.total) shl 56
   if self.overflowPos > 0:
@@ -188,6 +202,8 @@ proc Finalize*(self: var Siphash24Impl): uint64 {.noSideEffect.} =
 proc SipHash24*(input: openarray[int8];
                 pos, length: int;
                 key: SipHash24Key): uint64 =
+  ## A one-stop convenience function which will calculate a 64-bit hash
+  ## from the supplied input bytes and siphash24 key.
   var impl: Siphash24Impl
   doAssert(impl.Init(key) == true)
   doAssert(impl.Feed(input, pos, length) == true)
