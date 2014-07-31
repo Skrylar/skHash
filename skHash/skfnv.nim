@@ -12,6 +12,10 @@ import
 
 type
   RawData = ptr array[0..65535, uint8]
+  FnvEasilyHashable* = int|int8|int16|int32|int64|uint|
+    uint8|uint16|uint32|uint64
+    ## Typeclass representing data types that may be "easily" hashed by
+    ## the provided FNV generics.
 
 # }}}
 
@@ -150,30 +154,21 @@ proc Fnv1aHash64*(input: string): uint64 =
   shallowCopy(data, input)
   return Fnv1aHash64(addr(data[0]), data.len)
 
-template DefHash(typ: typedesc): stmt =
-  proc Fnv1Hash32*(input: typ): uint64 =
-    var data = input
-    return Fnv1Hash32(addr(data), sizeof(typ))
-  proc Fnv1aHash32*(input: typ): uint64 =
-    var data = input
-    return Fnv1aHash32(addr(data), sizeof(typ))
-  proc Fnv1Hash64*(input: typ): uint64 =
-    var data = input
-    return Fnv1Hash64(addr(data), sizeof(typ))
-  proc Fnv1aHash64*(input: typ): uint64 =
-    var data = input
-    return Fnv1aHash64(addr(data), sizeof(typ))
+proc Fnv1Hash32*[T:FnvEasilyHashable](input: T): uint64 =
+  var data = input
+  return Fnv1Hash32(addr(data), sizeof(T))
 
-DefHash(int)
-DefHash(int8)
-DefHash(int16)
-DefHash(int32)
-DefHash(int64)
-DefHash(uint)
-DefHash(uint8)
-DefHash(uint16)
-DefHash(uint32)
-DefHash(uint64)
+proc Fnv1aHash32*[T:FnvEasilyHashable](input: T): uint64 =
+  var data = input
+  return Fnv1aHash32(addr(data), sizeof(T))
+
+proc Fnv1Hash64*[T:FnvEasilyHashable](input: T): uint64 =
+  var data = input
+  return Fnv1Hash64(addr(data), sizeof(T))
+
+proc Fnv1aHash64*[T:FnvEasilyHashable](input: T): uint64 =
+  var data = input
+  return Fnv1aHash64(addr(data), sizeof(T))
 
 # }}}
 
